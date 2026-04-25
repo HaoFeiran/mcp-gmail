@@ -15,10 +15,17 @@ def write_field(vault: str, item: str, field: str, value: str) -> None:
     result = _op(["item", "edit", item, "--vault", vault, f"{field}[password]={value}"])
     if result.returncode != 0:
         subprocess.run(
-            ["op", "item", "create",
-             "--category", "Secure Note",
-             "--title", item,
-             "--vault", vault,
-             f"{field}[password]={value}"],
+            [
+                "op",
+                "item",
+                "create",
+                "--category",
+                "Secure Note",
+                "--title",
+                item,
+                "--vault",
+                vault,
+                f"{field}[password]={value}",
+            ],
             check=True,
         )
