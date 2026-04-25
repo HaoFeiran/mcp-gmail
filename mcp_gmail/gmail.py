@@ -9,6 +9,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Any, Dict, List, Optional
 
+import keyring
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -22,6 +23,8 @@ DEFAULT_TOKEN_PATH = "token.json"
 DEFAULT_USER_ID = "me"
 OP_TOKEN_FIELD = "gmail_token"
 OP_CREDENTIALS_FIELD = "gmail_credentials"
+KEYCHAIN_SERVICE = "mcp-gmail"
+KEYCHAIN_TOKEN_KEY = "gmail_token"
 
 # Gmail API scopes
 GMAIL_SCOPES = [
@@ -54,18 +57,30 @@ def get_gmail_service(
     use_op = bool(op_vault and op_item)
     creds = None
 
-    if use_op:
+    # Read token: keychain → 1Password → local file
+    token_raw = keyring.get_password(KEYCHAIN_SERVICE, KEYCHAIN_TOKEN_KEY)
+
+    if not token_raw and use_op:
         token_raw = onepassword.read_field(op_vault, op_item, OP_TOKEN_FIELD)
         if token_raw:
-            creds = Credentials.from_authorized_user_info(json.loads(token_raw))
-    elif os.path.exists(token_path):
-        with open(token_path, "r") as f:
-            creds = Credentials.from_authorized_user_info(json.load(f))
+            keyring.set_password(KEYCHAIN_SERVICE, KEYCHAIN_TOKEN_KEY, token_raw)
+
+    if not token_raw and os.path.exists(token_path):
+        with open(token_path) as f:
+            token_raw = json.dumps(json.load(f))
+        if token_raw:
+            keyring.set_password(KEYCHAIN_SERVICE, KEYCHAIN_TOKEN_KEY, token_raw)
+
+    if token_raw:
+        creds = Credentials.from_authorized_user_info(json.loads(token_raw))
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
+            # Refresh: keychain only — 1Password remains a durable backup with a valid refresh_token
+            keyring.set_password(KEYCHAIN_SERVICE, KEYCHAIN_TOKEN_KEY, creds.to_json())
         else:
+            # Initial OAuth flow
             if use_op:
                 creds_raw = onepassword.read_field(op_vault, op_item, OP_CREDENTIALS_FIELD)
                 if not creds_raw:
@@ -74,8 +89,7 @@ def get_gmail_service(
                         f"item='{op_item}', field='{OP_CREDENTIALS_FIELD}'). "
                         "Run the setup script to store your credentials.json in 1Password."
                     )
-                creds_info = json.loads(creds_raw)
-                flow = InstalledAppFlow.from_client_config(creds_info, scopes)
+                flow = InstalledAppFlow.from_client_config(json.loads(creds_raw), scopes)
             else:
                 if not os.path.exists(credentials_path):
                     raise FileNotFoundError(
@@ -86,11 +100,13 @@ def get_gmail_service(
 
             creds = flow.run_local_server(port=0)
 
-        if use_op:
-            onepassword.write_field(op_vault, op_item, OP_TOKEN_FIELD, creds.to_json())
-        else:
-            with open(token_path, "w") as f:
-                json.dump(json.loads(creds.to_json()), f)
+            # Initial auth: write to keychain always, plus the configured durable store
+            keyring.set_password(KEYCHAIN_SERVICE, KEYCHAIN_TOKEN_KEY, creds.to_json())
+            if use_op:
+                onepassword.write_field(op_vault, op_item, OP_TOKEN_FIELD, creds.to_json())
+            else:
+                with open(token_path, "w") as f:
+                    json.dump(json.loads(creds.to_json()), f)
 
     return build("gmail", "v1", credentials=creds)
 

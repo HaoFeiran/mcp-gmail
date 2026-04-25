@@ -14,8 +14,6 @@ from mcp_gmail.gmail import (
     DEFAULT_TOKEN_PATH,
     DEFAULT_USER_ID,
     GMAIL_SCOPES,
-    OP_TOKEN_FIELD,
-    OP_CREDENTIALS_FIELD,
 )
 
 
