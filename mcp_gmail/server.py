@@ -22,13 +22,18 @@ from mcp_gmail.gmail import (
     list_messages,
     modify_message_labels,
     parse_message_body,
+    parse_message_html,
     search_messages,
 )
 from mcp_gmail.gmail import send_email as gmail_send_email
 
 # Initialize the Gmail service
 service = get_gmail_service(
-    credentials_path=settings.credentials_path, token_path=settings.token_path, scopes=settings.scopes
+    credentials_path=settings.credentials_path,
+    token_path=settings.token_path,
+    scopes=settings.scopes,
+    op_vault=settings.op_vault,
+    op_item=settings.op_item,
 )
 
 mcp = FastMCP(
@@ -460,3 +465,33 @@ def get_emails(message_ids: list[str]) -> str:
             result += f"Error: {error}\n"
 
     return result
+
+
+@mcp.tool()
+def get_email_html(message_id: str) -> str:
+    """
+    Get the HTML body of an email message by its ID.
+
+    Args:
+        message_id: The Gmail message ID
+
+    Returns:
+        The raw HTML content of the email, or a message if no HTML part exists
+    """
+    message = get_message(service, message_id, user_id=settings.user_id)
+    headers = get_headers_dict(message)
+    subject = headers.get("Subject", "No Subject")
+    html = parse_message_html(message)
+
+    if not html:
+        return f"No HTML part found for message '{subject}' (ID: {message_id})"
+
+    return f"<!-- Subject: {subject} -->\n{html}"
+
+
+def main():
+    mcp.run()
+
+
+if __name__ == "__main__":
+    main()

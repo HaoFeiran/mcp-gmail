@@ -14,10 +14,14 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import Resource, build
 
+from mcp_gmail import onepassword
+
 # Default settings
 DEFAULT_CREDENTIALS_PATH = "credentials.json"
 DEFAULT_TOKEN_PATH = "token.json"
 DEFAULT_USER_ID = "me"
+OP_TOKEN_FIELD = "gmail_token"
+OP_CREDENTIALS_FIELD = "gmail_credentials"
 
 # Gmail API scopes
 GMAIL_SCOPES = [
@@ -38,47 +42,56 @@ def get_gmail_service(
     credentials_path: str = DEFAULT_CREDENTIALS_PATH,
     token_path: str = DEFAULT_TOKEN_PATH,
     scopes: List[str] = GMAIL_SCOPES,
+    op_vault: Optional[str] = None,
+    op_item: Optional[str] = None,
 ) -> GmailService:
     """
     Authenticate with Gmail API and return the service object.
 
-    Args:
-        credentials_path: Path to the credentials JSON file
-        token_path: Path to save/load the token
-        scopes: OAuth scopes to request
-
-    Returns:
-        Authenticated Gmail API service
+    When op_vault and op_item are provided, tokens and credentials are
+    loaded from and saved to 1Password instead of local files.
     """
+    use_op = bool(op_vault and op_item)
     creds = None
 
-    # Look for token file with stored credentials
-    if os.path.exists(token_path):
-        with open(token_path, "r") as token:
-            token_data = json.load(token)
-            creds = Credentials.from_authorized_user_info(token_data)
+    if use_op:
+        token_raw = onepassword.read_field(op_vault, op_item, OP_TOKEN_FIELD)
+        if token_raw:
+            creds = Credentials.from_authorized_user_info(json.loads(token_raw))
+    elif os.path.exists(token_path):
+        with open(token_path, "r") as f:
+            creds = Credentials.from_authorized_user_info(json.load(f))
 
-    # If credentials don't exist or are invalid, authenticate
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            # Check if credentials file exists
-            if not os.path.exists(credentials_path):
-                raise FileNotFoundError(
-                    f"Credentials file not found at {credentials_path}. "
-                    "Please download your OAuth credentials from Google Cloud Console."
-                )
+            if use_op:
+                creds_raw = onepassword.read_field(op_vault, op_item, OP_CREDENTIALS_FIELD)
+                if not creds_raw:
+                    raise RuntimeError(
+                        f"No credentials found in 1Password (vault='{op_vault}', "
+                        f"item='{op_item}', field='{OP_CREDENTIALS_FIELD}'). "
+                        "Run the setup script to store your credentials.json in 1Password."
+                    )
+                creds_info = json.loads(creds_raw)
+                flow = InstalledAppFlow.from_client_config(creds_info, scopes)
+            else:
+                if not os.path.exists(credentials_path):
+                    raise FileNotFoundError(
+                        f"Credentials file not found at {credentials_path}. "
+                        "Please download your OAuth credentials from Google Cloud Console."
+                    )
+                flow = InstalledAppFlow.from_client_secrets_file(credentials_path, scopes)
 
-            flow = InstalledAppFlow.from_client_secrets_file(credentials_path, scopes)
             creds = flow.run_local_server(port=0)
 
-        # Save credentials for future runs
-        token_json = json.loads(creds.to_json())
-        with open(token_path, "w") as token:
-            json.dump(token_json, token)
+        if use_op:
+            onepassword.write_field(op_vault, op_item, OP_TOKEN_FIELD, creds.to_json())
+        else:
+            with open(token_path, "w") as f:
+                json.dump(json.loads(creds.to_json()), f)
 
-    # Build the Gmail service
     return build("gmail", "v1", credentials=creds)
 
 
@@ -199,6 +212,36 @@ def parse_message_body(message: Dict[str, Any]) -> str:
         if "data" in message["payload"]["body"]:
             data = message["payload"]["body"]["data"]
             return base64.urlsafe_b64decode(data).decode()
+        return ""
+
+
+def parse_message_html(message: Dict[str, Any]) -> str:
+    """
+    Parse the HTML body of a Gmail message.
+
+    Args:
+        message: The Gmail message object
+
+    Returns:
+        The extracted HTML body, or empty string if not present
+    """
+
+    def get_html_part(parts):
+        for part in parts:
+            if part["mimeType"] == "text/html":
+                if "data" in part["body"]:
+                    return base64.urlsafe_b64decode(part["body"]["data"]).decode()
+            elif "parts" in part:
+                result = get_html_part(part["parts"])
+                if result:
+                    return result
+        return ""
+
+    if "parts" in message["payload"]:
+        return get_html_part(message["payload"]["parts"])
+    else:
+        if message["payload"].get("mimeType") == "text/html" and "data" in message["payload"]["body"]:
+            return base64.urlsafe_b64decode(message["payload"]["body"]["data"]).decode()
         return ""
 
 

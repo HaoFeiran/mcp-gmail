@@ -14,6 +14,8 @@ from mcp_gmail.gmail import (
     DEFAULT_TOKEN_PATH,
     DEFAULT_USER_ID,
     GMAIL_SCOPES,
+    OP_TOKEN_FIELD,
+    OP_CREDENTIALS_FIELD,
 )
 
 
@@ -29,6 +31,8 @@ class Settings(BaseSettings):
     scopes: List[str] = GMAIL_SCOPES
     user_id: str = DEFAULT_USER_ID
     max_results: int = 10
+    op_vault: Optional[str] = None
+    op_item: Optional[str] = None
 
     # Configure environment variable settings
     model_config = SettingsConfigDict(
