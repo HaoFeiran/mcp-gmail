@@ -3,8 +3,11 @@ This module provides utilities for authenticating with and using the Gmail API.
 """
 
 import base64
+import email.encoders
 import json
+import mimetypes
 import os
+from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Any, Dict, List, Optional
@@ -147,6 +150,55 @@ def create_message(
     encoded_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
 
     return {"raw": encoded_message}
+
+
+def create_message_with_attachment(
+    sender: str,
+    to: str,
+    subject: str,
+    message_text: str,
+    attachment_path: str,
+    cc: Optional[str] = None,
+    bcc: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Create a message with a file attachment."""
+    message = MIMEMultipart()
+    message["to"] = to
+    message["from"] = sender
+    message["subject"] = subject
+    if cc:
+        message["cc"] = cc
+    if bcc:
+        message["bcc"] = bcc
+
+    message.attach(MIMEText(message_text))
+
+    mime_type, _ = mimetypes.guess_type(attachment_path)
+    main_type, sub_type = (mime_type or "application/octet-stream").split("/", 1)
+    with open(attachment_path, "rb") as f:
+        part = MIMEBase(main_type, sub_type)
+        part.set_payload(f.read())
+    part.add_header("Content-Disposition", "attachment", filename=os.path.basename(attachment_path))
+    email.encoders.encode_base64(part)
+    message.attach(part)
+
+    return {"raw": base64.urlsafe_b64encode(message.as_bytes()).decode()}
+
+
+def send_email_with_attachment(
+    service: GmailService,
+    sender: str,
+    to: str,
+    subject: str,
+    body: str,
+    attachment_path: str,
+    user_id: str = DEFAULT_USER_ID,
+    cc: Optional[str] = None,
+    bcc: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Send an email with a file attachment."""
+    message = create_message_with_attachment(sender, to, subject, body, attachment_path, cc, bcc)
+    return service.users().messages().send(userId=user_id, body=message).execute()
 
 
 def create_multipart_message(

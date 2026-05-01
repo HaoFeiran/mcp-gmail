@@ -27,6 +27,7 @@ from mcp_gmail.gmail import (
     parse_message_body,
     parse_message_html,
     search_messages,
+    send_email_with_attachment,
 )
 from mcp_gmail.gmail import send_email as gmail_send_email
 
@@ -490,6 +491,47 @@ def get_email_html(message_id: str) -> str:
         return f"No HTML part found for message '{subject}' (ID: {message_id})"
 
     return f"<!-- Subject: {subject} -->\n{html}"
+
+
+@mcp.tool()
+def send_email_with_file(
+    to: str,
+    subject: str,
+    body: str,
+    attachment_path: str,
+    cc: Optional[str] = None,
+    bcc: Optional[str] = None,
+) -> str:
+    """
+    Send an email with a file attachment.
+
+    Args:
+        to: Recipient email address
+        subject: Email subject
+        body: Email body content
+        attachment_path: Absolute path to the file to attach
+        cc: Carbon copy recipients (optional)
+        bcc: Blind carbon copy recipients (optional)
+
+    Returns:
+        Confirmation of sent email
+    """
+    attachment_path = os.path.expanduser(attachment_path)
+    if not os.path.isfile(attachment_path):
+        return f"Error: file not found at {attachment_path}"
+    sender = service.users().getProfile(userId=settings.user_id).execute().get("emailAddress")
+    message = send_email_with_attachment(
+        service,
+        sender=sender,
+        to=to,
+        subject=subject,
+        body=body,
+        attachment_path=attachment_path,
+        user_id=settings.user_id,
+        cc=cc,
+        bcc=bcc,
+    )
+    return f"Email sent with attachment '{os.path.basename(attachment_path)}' (ID: {message.get('id')})"
 
 
 @mcp.tool()
