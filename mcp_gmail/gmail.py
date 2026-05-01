@@ -702,6 +702,70 @@ def untrash_message(
     return service.users().messages().untrash(userId=user_id, id=message_id).execute()
 
 
+def list_message_attachments(
+    service: GmailService, message_id: str, user_id: str = DEFAULT_USER_ID
+) -> List[Dict[str, Any]]:
+    """
+    List all attachments in a message.
+
+    Args:
+        service: Gmail API service instance
+        message_id: Gmail message ID
+        user_id: Gmail user ID (default: 'me')
+
+    Returns:
+        List of dicts with attachment_id, filename, mime_type, size
+    """
+    message = (
+        service.users().messages().get(userId=user_id, id=message_id, fields="payload/parts").execute()
+    )
+    attachments = []
+
+    def extract(parts):
+        for part in parts:
+            if part.get("filename") and part["body"].get("attachmentId"):
+                attachments.append(
+                    {
+                        "attachment_id": part["body"]["attachmentId"],
+                        "filename": part["filename"],
+                        "mime_type": part["mimeType"],
+                        "size": part["body"].get("size", 0),
+                    }
+                )
+            if "parts" in part:
+                extract(part["parts"])
+
+    if "parts" in message["payload"]:
+        extract(message["payload"]["parts"])
+
+    return attachments
+
+
+def get_attachment(
+    service: GmailService, message_id: str, attachment_id: str, user_id: str = DEFAULT_USER_ID
+) -> bytes:
+    """
+    Download a specific attachment by its ID.
+
+    Args:
+        service: Gmail API service instance
+        message_id: Gmail message ID
+        attachment_id: Attachment ID (from list_message_attachments)
+        user_id: Gmail user ID (default: 'me')
+
+    Returns:
+        Raw attachment bytes
+    """
+    response = (
+        service.users()
+        .messages()
+        .attachments()
+        .get(userId=user_id, messageId=message_id, id=attachment_id)
+        .execute()
+    )
+    return base64.urlsafe_b64decode(response.get("data", ""))
+
+
 def get_message_history(
     service: GmailService, history_id: str, user_id: str = DEFAULT_USER_ID, max_results: int = 100
 ) -> Dict[str, Any]:

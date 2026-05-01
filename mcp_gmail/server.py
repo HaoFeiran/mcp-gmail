@@ -5,6 +5,7 @@ This module provides a Model Context Protocol server for interacting with Gmail.
 It exposes Gmail messages as resources and provides tools for composing and sending emails.
 """
 
+import os
 import re
 from datetime import datetime
 from typing import Optional
@@ -14,11 +15,13 @@ from mcp.server.fastmcp import FastMCP
 from mcp_gmail.config import settings
 from mcp_gmail.gmail import (
     create_draft,
+    get_attachment,
     get_gmail_service,
     get_headers_dict,
     get_labels,
     get_message,
     get_thread,
+    list_message_attachments,
     list_messages,
     modify_message_labels,
     parse_message_body,
@@ -487,6 +490,66 @@ def get_email_html(message_id: str) -> str:
         return f"No HTML part found for message '{subject}' (ID: {message_id})"
 
     return f"<!-- Subject: {subject} -->\n{html}"
+
+
+@mcp.tool()
+def list_attachments(message_id: str) -> str:
+    """
+    List all attachments in an email message.
+
+    Args:
+        message_id: The Gmail message ID
+
+    Returns:
+        Formatted list of attachments with their IDs, filenames, types, and sizes
+    """
+    attachments = list_message_attachments(service, message_id, user_id=settings.user_id)
+
+    if not attachments:
+        return f"No attachments found in message {message_id}."
+
+    result = f"Found {len(attachments)} attachment(s) in message {message_id}:\n"
+    for i, att in enumerate(attachments, 1):
+        size_kb = att["size"] / 1024
+        result += f"\n{i}. {att['filename']}\n"
+        result += f"   Attachment ID: {att['attachment_id']}\n"
+        result += f"   Type: {att['mime_type']}\n"
+        result += f"   Size: {size_kb:.1f} KB\n"
+
+    return result
+
+
+@mcp.tool()
+def download_attachment(
+    message_id: str, attachment_id: str, filename: str, save_dir: str = "~/Downloads"
+) -> str:
+    """
+    Download an email attachment and save it to disk.
+
+    Args:
+        message_id: The Gmail message ID
+        attachment_id: The attachment ID (from list_attachments)
+        filename: The filename to save the attachment as
+        save_dir: Directory to save the file (default: ~/Downloads)
+
+    Returns:
+        Confirmation with the saved file path
+    """
+    filename = os.path.basename(filename)
+    if not filename:
+        return "Error: invalid filename."
+
+    save_dir = os.path.expanduser(save_dir)
+    os.makedirs(save_dir, exist_ok=True)
+
+    data = get_attachment(service, message_id, attachment_id, user_id=settings.user_id)
+
+    save_path = os.path.join(save_dir, filename)
+    with open(save_path, "wb") as f:
+        f.write(data)
+
+    size_kb = len(data) / 1024
+    return f"Attachment saved to: {save_path} ({size_kb:.1f} KB)"
 
 
 def main():
