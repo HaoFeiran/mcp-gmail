@@ -13,6 +13,7 @@ from email.mime.text import MIMEText
 from typing import Any, Dict, List, Optional
 
 import keyring
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -79,10 +80,15 @@ def get_gmail_service(
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-            # Refresh: keychain only — 1Password remains a durable backup with a valid refresh_token
-            keyring.set_password(KEYCHAIN_SERVICE, KEYCHAIN_TOKEN_KEY, creds.to_json())
-        else:
+            try:
+                creds.refresh(Request())
+                # Refresh: keychain only — 1Password remains a durable backup with a valid refresh_token
+                keyring.set_password(KEYCHAIN_SERVICE, KEYCHAIN_TOKEN_KEY, creds.to_json())
+            except RefreshError:
+                # Token was revoked or expired beyond recovery — clear it and re-auth
+                keyring.delete_password(KEYCHAIN_SERVICE, KEYCHAIN_TOKEN_KEY)
+                creds = None
+        if not creds or not creds.valid:
             # Initial OAuth flow
             if use_op:
                 creds_raw = onepassword.read_field(op_vault, op_item, OP_CREDENTIALS_FIELD)
